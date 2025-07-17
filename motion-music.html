@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Motion to Music</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tone@14.8.39/build/Tone.js"></script>
+  <!-- Require the peer dependencies of pose-detection. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+
+<!-- You must explicitly require a TF.js backend if you're not using the TF.js union bundle. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+<!-- Alternatively you can use the WASM backend: <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/tf-backend-wasm.js"></script> -->
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  <style>
+    body { margin: 0; background: #222; color: #fff; font-family: sans-serif; }
+    video, canvas { position: absolute; top: 0; left: 0; }
+    #startButton { position: absolute; top: 20px; left: 20px; z-index: 10; padding: 12px 24px; font-size: 1.2em; }
+    #info { position: absolute; top: 70px; left: 20px; z-index: 10; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <button id="startButton">Start Camera & Music</button>
+  <div id="info">Raise your right hand to change pitch, move your left hand left/right to change volume.</div>
+  <video id="video" width="640" height="480" autoplay muted></video>
+  <canvas id="canvas" width="640" height="480"></canvas>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const startButton = document.getElementById('startButton');
+    let detector, synth, running = false;
+
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      return new Promise(resolve => { video.onloadedmetadata = () => resolve(video); });
+    }
+
+    async function setupPose() {
+      detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet);
+    }
+
+    function setupSynth() {
+      synth = new Tone.Synth().toDestination();
+      Tone.Destination.volume.value = -8;
+    }
+
+    function drawKeypoints(keypoints) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      keypoints.forEach(kp => {
+        if (kp.score > 0.5) {
+          ctx.beginPath();
+          ctx.arc(kp.x, kp.y, 6, 0, 2 * Math.PI);
+          ctx.fillStyle = (kp.name === 'right_wrist') ? '#ff5252' : (kp.name === 'left_wrist' ? '#40c4ff' : '#fff');
+          ctx.fill();
+        }
+      });
+    }
+
+    let lastNote = null, lastVol = null, lastTrig = 0;
+    async function detectLoop() {
+      if (!running) return;
+      const poses = await detector.estimatePoses(video);
+      if (poses.length > 0) {
+        const kps = poses[0].keypoints;
+        drawKeypoints(kps);
+        const rw = kps.find(kp => kp.name === 'right_wrist');
+        const lw = kps.find(kp => kp.name === 'left_wrist');
+        if (rw && lw && rw.score > 0.5 && lw.score > 0.5) {
+          // Map right wrist Y (0=top, 480=bottom) to MIDI note 72 (C5) to 48 (C3)
+          const midi = Math.round(72 - (rw.y / 480) * 24);
+          const note = Tone.Frequency(midi, 'midi').toNote();
+          // Map left wrist X (0=left, 640=right) to volume 0.1 to 1
+          const vol = Math.max(0.1, Math.min(1, lw.x / 640));
+          Tone.Destination.volume.value = -20 + vol * 20; // -20dB to 0dB
+          // Only trigger if note/vol changed or 200ms passed
+          const now = Date.now();
+          if (note !== lastNote || Math.abs(vol - lastVol) > 0.05 || now - lastTrig > 200) {
+            synth.triggerAttackRelease(note, '8n');
+            lastNote = note; lastVol = vol; lastTrig = now;
+          }
+        }
+      }
+      requestAnimationFrame(detectLoop);
+    }
+
+    startButton.onclick = async () => {
+      startButton.style.display = 'none';
+      await Tone.start();
+      setupSynth();
+      await setupCamera();
+      video.play();
+      await setupPose();
+      running = true;
+      detectLoop();
+    };
+  </script>
+</body>
+</html>
