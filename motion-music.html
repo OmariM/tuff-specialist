@@ -18,6 +18,8 @@
   <style>
     body { margin: 0; background: #222; color: #fff; font-family: sans-serif; }
     video, canvas { position: absolute; top: 0; left: 0; }
+    video { transform: scaleX(-1); } /* Flip video horizontally */
+    canvas { transform: scaleX(-1); } /* Flip canvas to match video */
     #startButton { position: absolute; top: 20px; left: 20px; z-index: 10; padding: 12px 24px; font-size: 1.2em; }
     #info { position: absolute; top: 70px; left: 20px; z-index: 10; background: rgba(0,0,0,0.5); padding: 10px 20px; border-radius: 8px; }
   </style>
